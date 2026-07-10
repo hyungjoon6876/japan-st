@@ -421,6 +421,15 @@ details.verb .steps{padding:0 14px 12px;display:flex;flex-wrap:wrap;gap:8px}
 details.verb .step{border:1px solid var(--line);border-radius:3px;padding:6px 10px;font-family:var(--jp);font-size:15px;background:var(--washi)}
 details.verb .step small{display:block;font-family:var(--ko);font-size:10px;color:var(--kasumi)}
 
+/* ── TTS 스피커 버튼 ── */
+.say{border:1px solid var(--line-2);background:var(--washi-2);color:var(--matcha-d);
+  border-radius:999px;width:24px;height:24px;font-size:12px;line-height:1;padding:0;flex:none;
+  display:inline-grid;place-items:center;vertical-align:middle;transition:border-color .12s,background .12s,transform .1s}
+.say:hover{border-color:var(--matcha);background:var(--tint)}
+.say:active{transform:scale(.9)}
+.say.big{width:30px;height:30px;font-size:14px}
+.say.speaking{background:var(--matcha);border-color:var(--matcha);color:#fdfbf5}
+
 /* ═══════════ 한자 모듈 ═══════════ */
 /* 탭할 수 있는 한자 (예문·낱말 속) */
 .kj{cursor:pointer;border-bottom:1px dotted var(--matcha);transition:background .1s}
@@ -491,6 +500,7 @@ details.verb .step small{display:block;font-family:var(--ko);font-size:10px;colo
   </div>
   <div class="tally" id="tally" title="맞힌 문제 (正 = 5문제)"></div>
   <div class="toggles">
+    <button class="tg" id="tgTts"  aria-pressed="false" hidden>🔊 소리</button>
     <button class="tg" id="tgFuri" aria-pressed="false">후리가나</button>
     <button class="tg" id="tgKo"   aria-pressed="true">한국어</button>
     <button class="tg" id="tgTheme" aria-pressed="false">야간</button>
@@ -654,8 +664,9 @@ function openLens(ch){
     h+=`<div class="khead"><div class="kbig">${esc(ch)}</div><div class="kmeta">교육·상용 2,136자 데이터에 없는 한자입니다.</div></div>`;
   }else{
     const yomi=arr=>(arr||[]).length?arr.map(o=>`<b>${esc(o[0])}</b> <span class="kp">${esc(o[1])}</span>`).join("　"):"—";
+    const sayK=(k.ex&&k.ex.r)||(k.on&&k.on[0]&&k.on[0][0])||(k.kun&&k.kun[0]&&k.kun[0][0])||k.k;
     h+=`<div class="khead"><div class="kbig">${esc(k.k)}</div><div class="kmeta">
-      <div><span class="khan">${esc((k.kh||[]).join("·"))}</span> · ${esc(k.kmean||"")}</div>
+      <div><span class="khan">${esc((k.kh||[]).join("·"))}</span> · ${esc(k.kmean||"")} ${sayIcon(sayK,"big")}</div>
       <div class="krow"><span class="gbadge">${gradeLabel(k.g)}</span>
         <span class="gbadge">JLPT ${jlptLabel(k.jlpt)} 추정</span>
         <span class="gbadge">${k.s}획</span></div></div></div>`;
@@ -686,6 +697,37 @@ const save  = ()=>{ try{localStorage.setItem(KEY,JSON.stringify(store))}catch(e)
 store.box   = store.box   || {};   // id -> 0..4
 store.wrong = store.wrong || {};   // id -> {j,k,n}
 store.correct = store.correct || 0;
+store.tts   = store.tts   || {on:false, rate:0.9};
+
+/* ══ TTS (브라우저 Web Speech API — 무의존, 시스템/Edge 일본어 음성) ══ */
+const TTS_OK = typeof window!=="undefined" && "speechSynthesis" in window;
+let jaVoice=null;
+function pickJaVoice(){
+  if(!TTS_OK) return;
+  const vs=speechSynthesis.getVoices().filter(v=>/ja[-_]?jp/i.test(v.lang)||/japan|日本/i.test(v.name));
+  jaVoice = vs.find(v=>/neural|natural|online/i.test(v.name)) || vs[0] || null;
+}
+if(TTS_OK){ pickJaVoice(); try{ speechSynthesis.onvoiceschanged=pickJaVoice; }catch(e){} }
+function speak(text){
+  if(!TTS_OK || !text || !store.tts) return;
+  try{
+    speechSynthesis.cancel();
+    const u=new SpeechSynthesisUtterance(String(text).replace(/[（(].*?[)）]/g,""));
+    u.lang="ja-JP"; if(jaVoice) u.voice=jaVoice; u.rate=store.tts.rate||0.9;
+    speechSynthesis.speak(u);
+  }catch(e){}
+}
+/* 스피커 버튼 HTML (data-say 위임 처리) */
+function sayIcon(text,cls){
+  if(!TTS_OK || !text) return "";
+  return `<button class="say${cls?" "+cls:""}" data-say="${esc(text)}" title="소리 듣기" aria-label="소리 듣기">♪</button>`;
+}
+/* 요소 텍스트에서 일본어만 추출 (전역 탭-발음용) */
+function extractJa(t){
+  const m=String(t||"").match(/[぀-ヿ一-鿿々〆ヶ、。ー・「」『』〜~！？0-9]+/g);
+  if(!m) return "";
+  return m.join(" ").replace(/\s+/g," ").trim().slice(0,140);
+}
 
 function grade(id, ok, item){
   if(!id) return;
@@ -1170,7 +1212,7 @@ function vGrammar(){
     if(g.meaning_ko) s.appendChild(el("div","pat-ko ko-only",esc(g.meaning_ko)));
     (g.examples||[]).forEach(ex=>{
       const e=el("div","ex");
-      let h=`<div class="j">${highlightPattern(ex.jp,g.pattern)}</div>`;
+      let h=`<div class="j">${highlightPattern(ex.jp,g.pattern)} ${sayIcon(ex.jp)}</div>`;
       if(ex.reading) h+=`<div class="furi">${esc(ex.reading)}</div>`;
       if(ex.ko) h+=`<div class="k ko-only${ex.ko_gen?" ko-gen":""}"${ex.ko_gen?' title="교재에 인쇄되지 않은 번역 (자동 생성)"':""}>${esc(ex.ko)}</div>`;
       if(ex.note) h+=`<div class="n">${esc(ex.note)}</div>`;
@@ -1213,7 +1255,7 @@ function vVocab(){
   tb.innerHTML="<tr><th style='width:34%'>일본어</th><th style='width:26%'>읽기</th><th>뜻</th></tr>";
   list.forEach(v=>{
     const tr=el("tr");
-    tr.innerHTML=`<td class="jpface" style="font-family:var(--jp);font-size:17px">${kanjiTappable(v.word)}</td>`+
+    tr.innerHTML=`<td class="jpface" style="font-family:var(--jp);font-size:17px">${kanjiTappable(v.word)} ${sayIcon(v.reading||v.word)}</td>`+
                  `<td style="font-family:var(--jp);color:var(--matcha-d)">${esc(v.reading||"")}</td>`+
                  `<td class="ko-only">${esc(v.meaning_ko)}</td>`;
     tb.appendChild(tr);
@@ -1461,18 +1503,19 @@ function vDrill(){
 
   let deck=[];
   if(fMode==="vocab") deck=VOCAB.filter(v=>fLesson==="all"||v._lesson===fLesson)
-    .map(v=>({front:ruby(v.word,v.reading), read:v.reading, back:v.meaning_ko, id:"fv:"+v.word}));
+    .map(v=>({front:ruby(v.word,v.reading), read:v.reading, back:v.meaning_ko, say:v.reading||v.word, id:"fv:"+v.word}));
   if(fMode==="pattern") deck=GRAMMAR.filter(g=>g.pattern&&(fLesson==="all"||g._lesson===fLesson))
-    .map(g=>({front:esc(g.pattern), read:g.pattern_reading||"", back:g.meaning_ko||"", id:"fp:"+g.pattern}));
+    .map(g=>({front:esc(g.pattern), read:g.pattern_reading||"", back:g.meaning_ko||"", say:(g.pattern_reading||g.pattern||"").replace(/[〜~]/g,""), id:"fp:"+g.pattern}));
   if(fMode==="example") deck=GRAMMAR.filter(g=>fLesson==="all"||g._lesson===fLesson)
-    .flatMap(g=>(g.examples||[]).map(ex=>({front:esc(ex.jp), read:ex.reading||"", back:ex.ko||g.meaning_ko||"", id:"fe:"+ex.jp})));
+    .flatMap(g=>(g.examples||[]).map(ex=>({front:esc(ex.jp), read:ex.reading||"", back:ex.ko||g.meaning_ko||"", say:ex.jp, id:"fe:"+ex.jp})));
   if(fMode==="exercise") deck=EXERCISE.filter(b=>fLesson==="all"||b._lesson===fLesson)
     .flatMap(b=>(b.items||[]).filter(it=>(it.a||"").trim())
-      .map(it=>({front:esc(it.q), read:"", back:it.a, id:"fx:"+it.q})));
+      .map(it=>({front:esc(it.q), read:"", back:it.a, say:(it.q||"").replace(/[（(].*?[)）]/g,"").replace(/[　_]+/g," "), id:"fx:"+it.q})));
   if(fMode==="kanji") deck=kanjiPool().map(k=>({
       front:esc(k.k),
       read:[...(k.on||[]).map(o=>o[0]),...(k.kun||[]).map(o=>o[0])].join("  ")||"",
       back:(k.kmean||"")+"  ["+((k.kh||[]).join("·"))+"]",
+      say:(k.ex&&k.ex.r)||(k.kun&&k.kun[0]&&k.kun[0][0])||(k.on&&k.on[0]&&k.on[0][0])||k.k,
       id:"kjm:"+k.k }));
 
   if(!deck.length){ m.appendChild(el("div","empty","카드가 없습니다.")); return; }
@@ -1487,13 +1530,14 @@ function vDrill(){
     const d=deck[i%deck.length];
     prog.textContent=`${(i%deck.length)+1} / ${deck.length}`;
     card.className="genko card";
-    card.innerHTML = `<div class="${fMode==="example"?"jp-mid":"jp-lead"}">${d.front}</div>`;
+    card.innerHTML = `<div class="${fMode==="example"?"jp-mid":"jp-lead"}">${d.front} ${sayIcon(d.say,"big")}</div>`;
     if(open){
       card.classList.add("revealed");
       if(d.read) card.appendChild(el("div","gen-note",esc(d.read)));
       if(d.back) card.appendChild(el("div","ko-gloss ko-only",esc(d.back)));
     }else{
       card.appendChild(el("div","gen-note","눌러서 확인"));
+      if(store.tts && store.tts.on && d.say) speak(d.say);
     }
     card.onclick=()=>{ open=!open; draw(); };
     nav.innerHTML="";
@@ -1634,6 +1678,34 @@ $("#tgTheme").onclick=()=>{
   document.documentElement.dataset.theme=dark?"light":"dark";
   $("#tgTheme").setAttribute("aria-pressed",String(!dark));
 };
+/* 소리 토글 (자동 읽어주기) — TTS 지원 시에만 노출 */
+if(TTS_OK){
+  const tb=$("#tgTts"); tb.hidden=false;
+  tb.title="켜면 화면의 일본어를 탭해 발음을 들을 수 있고, 플래시카드는 자동 재생됩니다";
+  const sync=()=>{ tb.setAttribute("aria-pressed",String(!!store.tts.on)); tb.textContent = store.tts.on?"🔊 소리 켜짐":"🔊 소리"; };
+  sync();
+  tb.onclick=()=>{ store.tts.on=!store.tts.on; save(); sync(); if(store.tts.on) speak("こんにちは"); };
+}
+
+/* 스피커 버튼 위임 처리 (어디서 렌더되든 동작) */
+document.addEventListener("click",e=>{
+  const s=e.target.closest(".say");
+  if(s){ e.preventDefault(); e.stopPropagation(); speak(s.dataset.say);
+    s.classList.add("speaking"); setTimeout(()=>s.classList.remove("speaking"),600); }
+});
+/* 소리 모드: 화면의 어떤 일본어든 탭하면 발음 (버튼·입력 등 컨트롤 제외, 기존 동작은 유지) */
+document.addEventListener("click",e=>{
+  if(!store.tts || !store.tts.on) return;
+  if(e.target.closest(".say,button,a,input,textarea,select,label")) return;
+  let node=e.target;
+  for(let d=0; node && d<4; d++, node=node.parentElement){
+    const t=node.textContent||"";
+    if(/[぀-ヿ一-鿿]/.test(t)){
+      if(t.length<=90){ const jp=extractJa(t); if(jp) speak(jp); }
+      return;
+    }
+  }
+},true);
 
 document.addEventListener("keydown",e=>{
   if(e.key==="Escape"){ closeLens(); return; }
