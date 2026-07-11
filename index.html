@@ -771,31 +771,65 @@ function buildPlan(){
 }
 let PLAN = buildPlan();
 
-/* 하루 내레이션 큐: [{text, lang, ref?}] — 한국어 안내 + 일본어 발음 */
+/* 레슨 개념을 다루는 초보 가이드 찾기 (교사 프레이밍용) */
+function guideForLesson(L){ return GUIDES.find(g=>(g.related||[]).some(r=>r===L)) || null; }
+
+/* 하루 내레이션 — 선생님처럼 맥락을 엮어 설명 [{text,lang,ref?}] */
 function narration(day){
-  const q=[]; const P=s=>q.push({text:s,lang:"ko-KR"});
-  P(`데이 ${day.n} 학습을 시작합니다.`);
+  const q=[]; const KO=(s,ref)=>{ if(s) q.push({text:String(s),lang:"ko-KR",ref}); };
+  const JA=(s,ref)=>{ if(s) q.push({text:String(s),lang:"ja-JP",ref}); };
+  KO(`자, 데이 ${day.n} 학습을 시작할게요.`);
+  KO(`오늘은 ${day.lessons.join(", ")} 부분을 함께 공부해요.`);
+  const g0=day.lessons.map(guideForLesson).find(Boolean);
+  if(g0){ KO(g0.summary); }                          // 개념 한 줄 프레이밍
   if(day.vocab.length){
-    P(`오늘의 낱말 ${day.vocab.length}개입니다.`);
-    day.vocab.forEach(v=>{
+    KO(`먼저 오늘의 낱말 ${day.vocab.length}개예요. 소리 내서 따라 읽어 보세요.`);
+    day.vocab.forEach((v,i)=>{
       const ref="d-v-"+day.n+"-"+v.word;
-      q.push({text:(v.reading||v.word), lang:"ja-JP", ref});
-      if(v.meaning_ko) q.push({text:v.meaning_ko, lang:"ko-KR", ref});
+      JA(v.reading||v.word, ref);
+      KO(`${v.meaning_ko}, 라는 뜻이에요.`, ref);
+      if((i+1)%6===0 && i+1<day.vocab.length) KO("좋아요, 계속 가볼게요.");
     });
   }
   if(day.grammar.length){
-    P(`오늘의 문형 ${day.grammar.length}개입니다.`);
+    KO("이제 오늘의 문형이에요. 어떻게 쓰는지 하나씩 볼게요.");
     day.grammar.forEach((g,gi)=>{
       const ref="d-g-"+day.n+"-"+gi;
-      if(g.pattern) q.push({text:g.pattern.replace(/[〜~]/g,""), lang:"ja-JP", ref});
-      if(g.meaning_ko) q.push({text:g.meaning_ko, lang:"ko-KR", ref});
-      (g.examples||[]).slice(0,3).forEach(ex=>{
-        q.push({text:ex.jp, lang:"ja-JP", ref});
-        if(ex.ko) q.push({text:ex.ko, lang:"ko-KR", ref});
-      });
+      JA((g.pattern||"").replace(/[〜~]/g,""), ref);
+      if(g.meaning_ko) KO(`${g.meaning_ko}, 라는 표현이에요.`, ref);
+      if(g.tip&&g.tip.when) KO(g.tip.when, ref);       // 언제 쓰나 (교사 설명)
+      const exs=(g.examples||[]).slice(0,2);
+      if(exs.length) KO("예문을 들어볼게요.", ref);
+      exs.forEach(ex=>{ JA(ex.jp, ref); if(ex.ko) KO(`${ex.ko}, 라는 뜻이죠.`, ref); });
+      if(g.tip&&g.tip.mistake) KO(`여기서 주의할 점이 있어요. ${g.tip.mistake}`, ref);  // 실수 포인트
     });
   }
-  P(`데이 ${day.n} 학습을 마쳤습니다. 수고하셨어요.`);
+  if(day.kanji.length){
+    KO(`오늘 나온 한자는 ${day.kanji.length}자예요. 뜻만 짚고 갈게요.`);
+    day.kanji.slice(0,10).forEach(ch=>{ const k=KJ.get(ch); if(!k)return;
+      JA((k.on&&k.on[0]&&k.on[0][0])||ch); KO(`${k.kmean}. 한국 한자음은 ${(k.kh||[]).join(", ")}이에요.`);
+    });
+  }
+  KO(`오늘 학습은 여기까지예요. 낱말 ${day.vocab.length}개, 문형 ${day.grammar.length}개를 함께 봤어요. 정말 잘 하셨어요. 내일 또 만나요.`);
+  return q;
+}
+
+/* 초보 가이드 페이지 전체를 선생님처럼 낭독 */
+function guideNarration(g){
+  const q=[]; const KO=s=>{ if(s) q.push({text:String(s).replace(/\s+/g," "),lang:"ko-KR"}); };
+  const JA=s=>{ if(s) q.push({text:String(s),lang:"ja-JP"}); };
+  KO(`${g.title}. 오늘은 이 개념을 같이 공부해 볼게요.`);
+  KO(g.summary); KO(g.intro);
+  (g.sections||[]).forEach(s=>{
+    KO(s.heading); KO(s.body);
+    (s.examples||[]).slice(0,3).forEach(ex=>{ JA(ex.jp); if(ex.ko) KO(`${ex.ko}, 라는 뜻이에요.`); });
+  });
+  if((g.mistakes||[]).length){
+    KO("이번엔 초보자가 자주 하는 실수를 볼게요.");
+    g.mistakes.forEach(ms=>{ if(ms.wrong){ JA(ms.wrong); KO("이건 틀린 표현이고,"); } if(ms.right){ JA(ms.right); KO("이렇게 쓰는 게 맞아요."); } if(ms.note) KO(ms.note); });
+  }
+  (g.tips||[]).forEach(t=>KO(`기억할 팁이에요. ${t}`));
+  KO("여기까지예요. 오늘도 잘 하셨어요.");
   return q;
 }
 
@@ -1251,7 +1285,7 @@ function vOverview(){
 
 /* ── 초보 가이드 ── */
 let gOpen=null;
-function openGuide(id){ gOpen=id; current="guide"; drawNav(); render(); }
+function openGuide(id){ if(typeof Narrator!=="undefined")Narrator.stop(); gOpen=id; current="guide"; drawNav(); render(); }
 
 function guideTable(t){
   if(!t||!(t.rows||[]).length) return null;
@@ -1279,7 +1313,7 @@ function vGuide(){
 function guideDetail(g){
   const m=$("#main"); m.innerHTML="";
   const back=el("button","btn","← 가이드 목록"); back.style.marginBottom="14px";
-  back.onclick=()=>{ gOpen=null; render(); };
+  back.onclick=()=>{ Narrator.stop(); gOpen=null; render(); };
   m.appendChild(back);
 
   const hero=el("div","guide-hero");
@@ -1287,6 +1321,24 @@ function guideDetail(g){
   hero.innerHTML=`<div class="eyebrow">초보 가이드 · ${String(i).padStart(2,"0")}</div>
     <h2>${esc(g.title)}</h2><p>${esc(g.summary||"")}</p>`;
   m.appendChild(hero);
+
+  if(TTS_OK){
+    const player=el("div","dplayer");
+    const btn=el("button","btn primary big-play","▶ 선생님처럼 읽어주기");
+    const bar=el("div","dbar"); bar.innerHTML="<i></i>"; const barI=bar.querySelector("i");
+    const stat=el("div","gen-note");
+    player.appendChild(btn); player.appendChild(bar); player.appendChild(stat);
+    m.appendChild(player);
+    const gq=guideNarration(g);
+    const setStat=(x,n)=>{ barI.style.width=(n?Math.round(100*x/n):0)+"%"; stat.textContent=n?`${x} / ${n}`:""; };
+    btn.onclick=()=>{
+      if(Narrator.isPlaying()){ Narrator.pause(); btn.textContent="▶ 이어 듣기"; }
+      else{ const from=Narrator.index()>=gq.length?0:Narrator.index();
+        Narrator.play(gq, from, setStat, ()=>{ btn.textContent="▶ 다시 듣기"; setStat(gq.length,gq.length); });
+        btn.textContent="⏸ 일시정지"; }
+    };
+  }
+
   if(g.intro){ const p=el("p"); p.style.cssText="font-size:15px;color:var(--sumi-2);line-height:1.85;margin:0 0 20px"; p.textContent=g.intro; m.appendChild(p); }
 
   (g.sections||[]).forEach(s=>{
