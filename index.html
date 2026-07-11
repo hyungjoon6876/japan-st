@@ -430,6 +430,21 @@ details.verb .step small{display:block;font-family:var(--ko);font-size:10px;colo
 .say.big{width:30px;height:30px;font-size:14px}
 .say.speaking{background:var(--matcha);border-color:var(--matcha);color:#fdfbf5}
 
+/* ── 데일리 학습 ── */
+.dplayer{display:flex;align-items:center;gap:14px;flex-wrap:wrap;background:var(--washi-2);
+  border:1px solid var(--line);border-radius:12px;padding:15px 18px;margin:0 0 18px;box-shadow:var(--shadow)}
+.dplayer .big-play{font-size:15px;padding:11px 22px}
+.dbar{flex:1;min-width:140px;height:8px;background:var(--tint);border-radius:999px;overflow:hidden}
+.dbar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--matcha),var(--matcha-d));transition:width .3s}
+.dlist{display:flex;flex-wrap:wrap;gap:7px}
+.dchip{border:1px solid var(--line-2);background:var(--washi-2);border-radius:8px;min-width:46px;
+  padding:7px 6px;font-family:var(--mono);font-size:12px;color:var(--sumi-2);transition:border-color .12s,background .12s}
+.dchip:hover{border-color:var(--matcha)}
+.dchip.done{background:var(--tint);border-color:var(--matcha);color:var(--matcha-d)}
+.dchip.cur{outline:2px solid var(--matcha);outline-offset:1px;font-weight:700}
+.d-hi{background:color-mix(in srgb,var(--gold) 24%,transparent)!important;border-radius:5px;transition:background .2s}
+tr.d-hi td{background:color-mix(in srgb,var(--gold) 20%,transparent)!important}
+
 /* ═══════════ 한자 모듈 ═══════════ */
 /* 탭할 수 있는 한자 (예문·낱말 속) */
 .kj{cursor:pointer;border-bottom:1px dotted var(--matcha);transition:background .1s}
@@ -698,16 +713,20 @@ store.box   = store.box   || {};   // id -> 0..4
 store.wrong = store.wrong || {};   // id -> {j,k,n}
 store.correct = store.correct || 0;
 store.tts   = store.tts   || {on:false, rate:0.9};
+store.daily = store.daily || {pace:"보통", done:{}, cur:1};
 
-/* ══ TTS (브라우저 Web Speech API — 무의존, 시스템/Edge 일본어 음성) ══ */
+/* ══ TTS (브라우저 Web Speech API — 무의존, 시스템 일본어/한국어 음성) ══ */
 const TTS_OK = typeof window!=="undefined" && "speechSynthesis" in window;
-let jaVoice=null;
-function pickJaVoice(){
+let jaVoice=null, koVoice=null;
+function pickVoices(){
   if(!TTS_OK) return;
-  const vs=speechSynthesis.getVoices().filter(v=>/ja[-_]?jp/i.test(v.lang)||/japan|日本/i.test(v.name));
-  jaVoice = vs.find(v=>/neural|natural|online/i.test(v.name)) || vs[0] || null;
+  const all=speechSynthesis.getVoices();
+  const ja=all.filter(v=>/ja[-_]?jp/i.test(v.lang)||/japan|日本/i.test(v.name));
+  jaVoice = ja.find(v=>/neural|natural|online/i.test(v.name)) || ja[0] || null;
+  const ko=all.filter(v=>/ko[-_]?kr/i.test(v.lang)||/korean|한국/i.test(v.name));
+  koVoice = ko.find(v=>/neural|natural|online/i.test(v.name)) || ko[0] || null;
 }
-if(TTS_OK){ pickJaVoice(); try{ speechSynthesis.onvoiceschanged=pickJaVoice; }catch(e){} }
+if(TTS_OK){ pickVoices(); try{ speechSynthesis.onvoiceschanged=pickVoices; }catch(e){} }
 function speak(text){
   if(!TTS_OK || !text || !store.tts) return;
   try{
@@ -728,6 +747,80 @@ function extractJa(t){
   if(!m) return "";
   return m.join(" ").replace(/\s+/g," ").trim().slice(0,140);
 }
+
+/* ══ 데일리 학습 (분량 분할 + 음성 안내) ══════════════ */
+const DAILY_PACE = {"적게":10, "보통":18, "많이":28};
+function buildPlan(){
+  const perDay = DAILY_PACE[store.daily.pace] || 18;
+  const bonmun = LESSONS.filter(L=>VOCAB.some(v=>v._lesson===L)||GRAMMAR.some(g=>g._lesson===L));
+  const stream=[];
+  bonmun.forEach(L=>{
+    VOCAB.filter(v=>v._lesson===L).forEach(v=>stream.push({t:"v",lesson:L,v}));
+    GRAMMAR.filter(g=>g._lesson===L).forEach(g=>stream.push({t:"g",lesson:L,g}));
+  });
+  const days=[];
+  for(let i=0;i<stream.length;i+=perDay){
+    const slice=stream.slice(i,i+perDay);
+    const vocab=slice.filter(x=>x.t==="v").map(x=>x.v);
+    const grammar=slice.filter(x=>x.t==="g").map(x=>x.g);
+    const lessons=[...new Set(slice.map(x=>x.lesson))];
+    const kanji=[...new Set(vocab.flatMap(v=>[...(v.word||"")].filter(ch=>isK(ch)&&KJ.has(ch))))];
+    days.push({n:days.length+1, lessons, vocab, grammar, kanji});
+  }
+  return days;
+}
+let PLAN = buildPlan();
+
+/* 하루 내레이션 큐: [{text, lang, ref?}] — 한국어 안내 + 일본어 발음 */
+function narration(day){
+  const q=[]; const P=s=>q.push({text:s,lang:"ko-KR"});
+  P(`데이 ${day.n} 학습을 시작합니다.`);
+  if(day.vocab.length){
+    P(`오늘의 낱말 ${day.vocab.length}개입니다.`);
+    day.vocab.forEach(v=>{
+      const ref="d-v-"+day.n+"-"+v.word;
+      q.push({text:(v.reading||v.word), lang:"ja-JP", ref});
+      if(v.meaning_ko) q.push({text:v.meaning_ko, lang:"ko-KR", ref});
+    });
+  }
+  if(day.grammar.length){
+    P(`오늘의 문형 ${day.grammar.length}개입니다.`);
+    day.grammar.forEach((g,gi)=>{
+      const ref="d-g-"+day.n+"-"+gi;
+      if(g.pattern) q.push({text:g.pattern.replace(/[〜~]/g,""), lang:"ja-JP", ref});
+      if(g.meaning_ko) q.push({text:g.meaning_ko, lang:"ko-KR", ref});
+      (g.examples||[]).slice(0,3).forEach(ex=>{
+        q.push({text:ex.jp, lang:"ja-JP", ref});
+        if(ex.ko) q.push({text:ex.ko, lang:"ko-KR", ref});
+      });
+    });
+  }
+  P(`데이 ${day.n} 학습을 마쳤습니다. 수고하셨어요.`);
+  return q;
+}
+
+/* 내레이션 플레이어 (utterance 체이닝, 현재 항목 하이라이트) */
+const Narrator = (()=>{
+  let queue=[], idx=0, playing=false, onstep=null, ondone=null;
+  const clearHi=()=>document.querySelectorAll(".d-hi").forEach(e=>e.classList.remove("d-hi"));
+  function stop(){ playing=false; try{speechSynthesis.cancel();}catch(e){} clearHi(); }
+  function step(){
+    if(!playing) return;
+    if(idx>=queue.length){ playing=false; clearHi(); if(ondone)ondone(); return; }
+    const q=queue[idx]; clearHi();
+    if(q.ref){ const el=document.getElementById(q.ref); if(el){ el.classList.add("d-hi"); el.scrollIntoView({block:"center",behavior:"smooth"}); } }
+    if(onstep) onstep(idx, queue.length);
+    const u=new SpeechSynthesisUtterance(String(q.text).replace(/[（(].*?[)）]/g,""));
+    u.lang=q.lang; u.voice=(q.lang.indexOf("ja")===0?jaVoice:koVoice)||null; u.rate=(store.tts.rate||0.95);
+    u.onend=()=>{ if(playing){ idx++; setTimeout(step,240); } };
+    u.onerror=()=>{ if(playing){ idx++; setTimeout(step,240); } };
+    try{ speechSynthesis.speak(u); }catch(e){ idx++; setTimeout(step,240); }
+  }
+  return {
+    play(q, from, sstep, sdone){ if(!TTS_OK)return; queue=q; idx=from||0; playing=true; onstep=sstep; ondone=sdone; step(); },
+    pause(){ stop(); }, stop, isPlaying:()=>playing, index:()=>idx
+  };
+})();
 
 function grade(id, ok, item){
   if(!id) return;
@@ -966,17 +1059,18 @@ function quizPoolSize(kinds, lesson){ return buildQuiz(kinds, lesson, 0).length;
 /* ══ 뷰 ═══════════════════════════════════════════════ */
 const VIEWS=[
   {id:"overview", n:"一",  label:"개요",     cnt:()=>pages.length+"p"},
-  {id:"guide",    n:"二",  label:"초보 가이드",cnt:()=>GUIDES.length},
-  {id:"kana",     n:"三",  label:"가나",     cnt:()=>KANA.length},
-  {id:"grammar",  n:"四",  label:"문형",     cnt:()=>GRAMMAR.length},
-  {id:"vocab",    n:"五",  label:"낱말",     cnt:()=>VOCAB.length},
-  {id:"kanji",    n:"六",  label:"한자",     cnt:()=>KANJI.length?TEXTBOOK_KANJI.size:""},
-  {id:"conj",     n:"七",  label:"활용",     cnt:()=>TABLES.length},
-  {id:"quiz",     n:"八",  label:"퀴즈",     cnt:()=>""},
-  {id:"drill",    n:"九",  label:"플래시카드",cnt:()=>""},
-  {id:"exercise", n:"十",  label:"연습문제", cnt:()=>EXERCISE.length},
-  {id:"review",   n:"十一", label:"오답노트", cnt:()=>Object.keys(store.wrong).length||""},
-  {id:"search",   n:"十二", label:"검색",     cnt:()=>""},
+  {id:"daily",    n:"二",  label:"데일리",   cnt:()=>PLAN.length+"일"},
+  {id:"guide",    n:"三",  label:"초보 가이드",cnt:()=>GUIDES.length},
+  {id:"kana",     n:"四",  label:"가나",     cnt:()=>KANA.length},
+  {id:"grammar",  n:"五",  label:"문형",     cnt:()=>GRAMMAR.length},
+  {id:"vocab",    n:"六",  label:"낱말",     cnt:()=>VOCAB.length},
+  {id:"kanji",    n:"七",  label:"한자",     cnt:()=>KANJI.length?TEXTBOOK_KANJI.size:""},
+  {id:"conj",     n:"八",  label:"활용",     cnt:()=>TABLES.length},
+  {id:"quiz",     n:"九",  label:"퀴즈",     cnt:()=>""},
+  {id:"drill",    n:"十",  label:"플래시카드",cnt:()=>""},
+  {id:"exercise", n:"十一", label:"연습문제", cnt:()=>EXERCISE.length},
+  {id:"review",   n:"十二", label:"오답노트", cnt:()=>Object.keys(store.wrong).length||""},
+  {id:"search",   n:"十三", label:"검색",     cnt:()=>""},
 ].filter(v=>v.id!=="kanji" || KANJI.length);   // 한자 데이터 없으면 탭 숨김
 let current="overview";
 
@@ -986,12 +1080,95 @@ function drawNav(){
     const b=el("button","tab");
     b.innerHTML=`<span class="n">${v.n}</span><span>${v.label}</span><span class="cnt">${v.cnt()||""}</span>`;
     b.setAttribute("aria-current", v.id===current?"true":"false");
-    b.onclick=()=>{current=v.id; gOpen=null; drawNav(); render();};
+    b.onclick=()=>{ if(typeof Narrator!=="undefined")Narrator.stop(); current=v.id; gOpen=null; dOpen=null; drawNav(); render(); };
     nav.appendChild(b);
   });
 }
 
 function title(t,s){ const m=$("#main"); m.innerHTML=""; m.appendChild(el("h2","view-title",t)); if(s)m.appendChild(el("p","view-sub",s)); return m; }
+
+/* ── 데일리 학습 ── */
+let dOpen=null;
+function markDone(n){ store.daily.done[n]=1; if((store.daily.cur||1)<=n) store.daily.cur=Math.min(PLAN.length,n+1); save(); }
+function vDaily(){
+  const m=title("데일리 학습","하루 분량을 음성으로 안내합니다. ▶ 를 누르면 한국어 안내와 함께 오늘의 일본어를 순서대로 읽어줍니다.");
+  if(!PLAN.length){ m.appendChild(el("div","empty","학습 데이터가 없습니다.")); return; }
+
+  const pc=el("div","chips"); pc.appendChild(el("span","gen-note","하루 분량 "));
+  Object.keys(DAILY_PACE).forEach(p=>{
+    const b=el("button","chip",`${p} (${DAILY_PACE[p]})`);
+    b.setAttribute("aria-pressed", store.daily.pace===p?"true":"false");
+    b.onclick=()=>{ Narrator.stop(); store.daily.pace=p; save(); PLAN=buildPlan();
+      store.daily.cur=Math.min(store.daily.cur||1,PLAN.length); dOpen=null; vDaily(); };
+    pc.appendChild(b);
+  });
+  m.appendChild(pc);
+  m.appendChild(el("p","view-sub",`총 ${PLAN.length}일 과정 · 완료 ${Object.keys(store.daily.done).length}일`));
+
+  const dayNo=Math.min(dOpen||store.daily.cur||1, PLAN.length);
+  const day=PLAN[dayNo-1];
+
+  const hero=el("div","guide-hero");
+  hero.innerHTML=`<div class="eyebrow">DAY ${String(dayNo).padStart(2,"0")} / ${PLAN.length}</div>
+    <h2>${dayNo===(store.daily.cur||1)?"오늘의 학습":"복습"}</h2>
+    <p>${esc(day.lessons.join(" · "))}<br>낱말 ${day.vocab.length} · 문형 ${day.grammar.length} · 한자 ${day.kanji.length}</p>`;
+  m.appendChild(hero);
+
+  const queue=narration(day);
+  const player=el("div","dplayer");
+  const btn=el("button","btn primary big-play", TTS_OK?"▶ 음성 안내 시작":"음성 미지원(기기에 일본어 음성 없음)");
+  btn.disabled=!TTS_OK;
+  const bar=el("div","dbar"); bar.innerHTML="<i></i>"; const barI=bar.querySelector("i");
+  const stat=el("div","gen-note");
+  player.appendChild(btn); player.appendChild(bar); player.appendChild(stat);
+  m.appendChild(player);
+  const setStat=(i,n)=>{ barI.style.width=(n?Math.round(100*i/n):0)+"%"; stat.textContent=n?`${i} / ${n}`:""; };
+  btn.onclick=()=>{
+    if(Narrator.isPlaying()){ Narrator.pause(); btn.textContent="▶ 이어 듣기"; }
+    else{ const from=Narrator.index()>=queue.length?0:Narrator.index();
+      Narrator.play(queue, from, setStat, ()=>{ btn.textContent="▶ 다시 듣기"; setStat(queue.length,queue.length); markDone(dayNo); drawNav(); });
+      btn.textContent="⏸ 일시정지"; }
+  };
+
+  if(day.vocab.length){
+    const s=el("div","sec"); s.appendChild(el("h3",null,"낱말"));
+    const tb=el("table");
+    day.vocab.forEach(v=>{ const tr=el("tr"); tr.id="d-v-"+dayNo+"-"+v.word;
+      tr.innerHTML=`<td class="jpface" style="font-family:var(--jp);font-size:17px">${kanjiTappable(v.word)} ${sayIcon(v.reading||v.word)}</td>`+
+        `<td style="color:var(--matcha-d);font-family:var(--jp)">${esc(v.reading||"")}</td>`+
+        `<td class="ko-only">${esc(v.meaning_ko)}</td>`; tb.appendChild(tr); });
+    s.appendChild(tb); m.appendChild(s); wireKanji(s);
+  }
+  if(day.grammar.length){
+    const s=el("div","sec"); s.appendChild(el("h3",null,"문형"));
+    day.grammar.forEach((g,gi)=>{ const box=el("div"); box.id="d-g-"+dayNo+"-"+gi; box.style.margin="12px 0";
+      let h=`<div class="pat">${ruby(g.pattern||"",g.pattern_reading)} ${sayIcon((g.pattern_reading||g.pattern||"").replace(/[〜~]/g,""))}</div>`;
+      if(g.meaning_ko) h+=`<div class="pat-ko ko-only">${esc(g.meaning_ko)}</div>`;
+      (g.examples||[]).slice(0,3).forEach(ex=>{ h+=`<div class="ex"><div class="j">${esc(ex.jp)} ${sayIcon(ex.jp)}</div>${ex.ko?`<div class="k ko-only">${esc(ex.ko)}</div>`:""}</div>`; });
+      box.innerHTML=h; s.appendChild(box); }); m.appendChild(s);
+  }
+  if(day.kanji.length){
+    const s=el("div","sec"); s.appendChild(el("h3",null,`오늘의 한자 ${day.kanji.length}`));
+    const kg=el("div","kgrid");
+    day.kanji.forEach(ch=>{ const k=KJ.get(ch); if(!k)return;
+      const t=el("button","ktile"); t.innerHTML=`<span class="gband g-${k.g}"></span><span class="kc">${esc(ch)}</span><span class="km">${esc(k.kmean||"")}</span>`;
+      t.onclick=()=>openLens(ch); kg.appendChild(t); });
+    s.appendChild(kg); m.appendChild(s);
+  }
+
+  const nav=el("div","row"); nav.style.justifyContent="space-between";
+  const prev=el("button","btn","‹ 이전 날"); prev.disabled=dayNo<=1; prev.onclick=()=>{ Narrator.stop(); dOpen=dayNo-1; vDaily(); };
+  const doneBtn=el("button","btn "+(store.daily.done[dayNo]?"":"primary"), store.daily.done[dayNo]?"완료됨 ✓":"오늘 완료");
+  doneBtn.onclick=()=>{ Narrator.stop(); markDone(dayNo); dOpen=Math.min(PLAN.length,dayNo+1); vDaily(); };
+  const next=el("button","btn","다음 날 ›"); next.disabled=dayNo>=PLAN.length; next.onclick=()=>{ Narrator.stop(); dOpen=dayNo+1; vDaily(); };
+  nav.appendChild(prev); nav.appendChild(doneBtn); nav.appendChild(next); m.appendChild(nav);
+
+  const list=el("div","sec"); list.appendChild(el("h3",null,"전체 일정"));
+  const grid=el("div","dlist");
+  PLAN.forEach(d=>{ const b=el("button","dchip"+(store.daily.done[d.n]?" done":"")+(d.n===dayNo?" cur":""),"D"+d.n);
+    b.onclick=()=>{ Narrator.stop(); dOpen=d.n; vDaily(); }; grid.appendChild(b); });
+  list.appendChild(grid); m.appendChild(list);
+}
 
 /* ── 개요 ── */
 function vOverview(){
@@ -1005,7 +1182,7 @@ function vOverview(){
     개념이 막히면 <b>초보 가이드</b>부터, 한자는 <b>문맥 렌즈</b>로, 외울 땐 <b>플래시카드·퀴즈</b>로. 진도는 이 기기에 저장돼요.</p>
     <div class="cta"></div>`;
   const cta=hero.querySelector(".cta");
-  [["초보 가이드로 시작","guide","primary"],["퀴즈 풀기","quiz",""],["플래시카드","drill",""]].forEach(([t,v,cls])=>{
+  [["▶ 오늘의 학습","daily","primary"],["초보 가이드","guide",""],["플래시카드","drill",""]].forEach(([t,v,cls])=>{
     const b=el("button","btn "+cls,t); b.onclick=()=>{current=v; drawNav(); render();}; cta.appendChild(b);
   });
   m.appendChild(hero);
@@ -1652,7 +1829,7 @@ function vSearch(){
 
 /* ══ 라우팅 ══════════════════════════════════════════ */
 function render(){
-  ({overview:vOverview,guide:vGuide,kana:vKana,grammar:vGrammar,vocab:vVocab,kanji:vKanji,conj:vConj,
+  ({overview:vOverview,daily:vDaily,guide:vGuide,kana:vKana,grammar:vGrammar,vocab:vVocab,kanji:vKanji,conj:vConj,
     quiz:vQuiz,drill:vDrill,exercise:vExercise,review:vReview,search:vSearch}[current]||vOverview)();
   window.scrollTo(0,0);
   drawNav();
