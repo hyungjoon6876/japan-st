@@ -761,36 +761,72 @@ const stripTags = s => String(s==null?"":s).replace(/<rt>.*?<\/rt>/g,"").replace
   if(dirty) save();
 })();
 
-/* ── 진도 백업·복원·초기화 (기기 교체·저장소 초기화 대비) ── */
-function exportProgress(){
+/* ── 진도 백업·복원·초기화 (기기 교체·저장소 초기화 대비) ──
+   iOS 홈스크린(standalone)은 브라우저 크롬이 없어 <a download>가 무시되고 blob 네비게이션이 앱을
+   데드엔드로 만든다. 그래서 파일 저장은 Web Share(파일) → 다운로드 → 텍스트 복사 순으로 폴백한다. */
+function progressFile(){ const d=new Date(),p=n=>String(n).padStart(2,"0"); return `일본어-진도-${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}.json`; }
+function bkModal(titleHtml){
+  const back=el("div","bkmodal"); back.style.cssText="position:fixed;inset:0;background:rgba(20,18,16,.55);z-index:2000;display:flex;align-items:center;justify-content:center;padding:18px";
+  const box=el("div"); box.style.cssText="background:var(--washi-2);color:var(--sumi);max-width:540px;width:100%;max-height:82vh;overflow:auto;border:1px solid var(--line);border-radius:14px;padding:18px 18px 16px;box-shadow:0 18px 60px rgba(0,0,0,.35)";
+  box.innerHTML=titleHtml; back.appendChild(box);
+  back.onclick=e=>{ if(e.target===back) back.remove(); };
+  document.body.appendChild(back); return {back,box};
+}
+async function exportProgress(){
+  const json=JSON.stringify(store), fname=progressFile();
   try{
-    const blob=new Blob([JSON.stringify(store)],{type:"application/json"});
-    const url=URL.createObjectURL(blob), a=document.createElement("a");
-    const d=new Date(), p=n=>String(n).padStart(2,"0");
-    a.href=url; a.download=`일본어-진도-${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}.json`;
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(()=>URL.revokeObjectURL(url),1000);
-  }catch(e){ alert("내보내기에 실패했어요: "+e.message); }
+    if(navigator.canShare){
+      const file=new File([json],fname,{type:"application/json"});
+      if(navigator.canShare({files:[file]})){
+        try{ await navigator.share({files:[file], title:"일본어 진도 백업"}); return; }
+        catch(e){ if(e && e.name==="AbortError") return; }   // 사용자가 취소한 경우만 조용히 종료
+      }
+    }
+  }catch(e){}
+  try{   // 데스크톱·안드로이드: 파일 다운로드
+    const url=URL.createObjectURL(new Blob([json],{type:"application/json"})), a=document.createElement("a");
+    a.href=url; a.download=fname; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),1500); return;
+  }catch(e){}
+  showCopyModal(json);   // 최후 폴백
+}
+function showCopyModal(text){
+  const {back,box}=bkModal(`<h3 style="margin:0 0 6px">진도 백업 (텍스트 복사)</h3>
+    <p class="view-sub" style="margin:0 0 10px">아래 내용을 전체 복사해 메모앱 등에 붙여넣어 보관하세요. 복원은 '가져오기 → 붙여넣기'로 합니다.</p>`);
+  const ta=el("textarea"); ta.readOnly=true; ta.value=text;
+  ta.style.cssText="width:100%;height:150px;box-sizing:border-box;font-family:var(--mono);font-size:12px;padding:8px;border:1px solid var(--line);border-radius:8px";
+  box.appendChild(ta);
+  const row=el("div","chips"); row.style.marginTop="10px";
+  const cp=el("button","chip","전체 복사");
+  cp.onclick=async()=>{ try{ await navigator.clipboard.writeText(text); }catch(e){ ta.focus(); ta.select(); try{document.execCommand("copy");}catch(_){} } cp.textContent="복사됨 ✓"; };
+  const cl=el("button","chip","닫기"); cl.onclick=()=>back.remove();
+  row.appendChild(cp); row.appendChild(cl); box.appendChild(row);
+  ta.focus(); ta.select();
+}
+function applyImport(text, back){
+  try{
+    const data=JSON.parse(text);
+    if(!data||typeof data!=="object") throw new Error("진도 형식이 아니에요");
+    ["box","wrong","daily","tts","ui","kjadd"].forEach(k=>{ if(data[k]!=null) store[k]=data[k]; });
+    if(typeof data.correct==="number") store.correct=data.correct;
+    if(!save()) throw new Error("이 기기에 저장할 수 없어요");
+    if(back) back.remove();
+    alert("진도를 가져왔어요."); current="overview"; drawNav(); render();
+  }catch(e){ alert("가져오기 실패: "+e.message); }
 }
 function importProgress(){
-  const inp=document.createElement("input");
-  inp.type="file"; inp.accept="application/json,.json";
-  inp.onchange=()=>{
-    const f=inp.files&&inp.files[0]; if(!f) return;
-    const r=new FileReader();
-    r.onload=()=>{
-      try{
-        const data=JSON.parse(r.result);
-        if(!data||typeof data!=="object") throw new Error("진도 파일 형식이 아니에요");
-        ["box","wrong","daily","tts","ui","kjadd"].forEach(k=>{ if(data[k]!=null) store[k]=data[k]; });
-        if(typeof data.correct==="number") store.correct=data.correct;
-        if(!save()) throw new Error("이 기기에 저장할 수 없어요");
-        alert("진도를 가져왔어요."); current="overview"; drawNav(); render();
-      }catch(e){ alert("가져오기 실패: "+e.message); }
-    };
-    r.readAsText(f);
-  };
-  inp.click();
+  const {back,box}=bkModal(`<h3 style="margin:0 0 6px">진도 가져오기</h3>
+    <p class="view-sub" style="margin:0 0 10px">백업 파일을 고르거나, 복사해 둔 백업 텍스트를 붙여넣으세요.</p>`);
+  const fin=el("input"); fin.type="file"; fin.accept="application/json,.json"; fin.style.display="block";
+  fin.onchange=()=>{ const f=fin.files&&fin.files[0]; if(!f)return; const r=new FileReader(); r.onload=()=>applyImport(r.result, back); r.readAsText(f); };
+  box.appendChild(fin);
+  const ta=el("textarea"); ta.placeholder="여기에 백업 텍스트 붙여넣기";
+  ta.style.cssText="width:100%;height:120px;box-sizing:border-box;margin-top:12px;font-family:var(--mono);font-size:12px;padding:8px;border:1px solid var(--line);border-radius:8px";
+  box.appendChild(ta);
+  const row=el("div","chips"); row.style.marginTop="10px";
+  const ap=el("button","chip","붙여넣기 적용"); ap.onclick=()=>{ if(ta.value.trim()) applyImport(ta.value, back); };
+  const cl=el("button","chip","닫기"); cl.onclick=()=>back.remove();
+  row.appendChild(ap); row.appendChild(cl); box.appendChild(row);
 }
 function resetProgress(){
   if(!confirm("이 기기의 학습 진도(익힌 항목·오답노트·맞힌 문제)를 모두 지울까요? 되돌릴 수 없어요.")) return;
