@@ -473,7 +473,7 @@ tr.d-hi td{background:color-mix(in srgb,var(--gold) 20%,transparent)!important}
 #narrCap.on{display:block}
 #narrCap.ja{font-size:16.5px;color:var(--sumi);font-weight:600}
 
-/* ── 상황 영상 ── */
+/* ── 요미짭짭 이야기 ── */
 .video-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;margin:4px 0 12px}
 .vcard{display:block;width:100%;padding:0;text-align:left;overflow:hidden;border:1px solid var(--line);
   border-radius:8px;background:var(--washi-2);box-shadow:var(--shadow);transition:border-color .14s,transform .14s,box-shadow .14s}
@@ -483,20 +483,28 @@ tr.d-hi td{background:color-mix(in srgb,var(--gold) 20%,transparent)!important}
 .vplay{position:absolute;right:12px;bottom:10px;width:36px;height:36px;display:grid;place-items:center;
   border-radius:50%;background:color-mix(in srgb,var(--washi-2) 90%,transparent);color:var(--shu);
   box-shadow:0 3px 12px rgba(38,37,29,.18);font-size:14px;padding-left:2px}
-.vmeta{padding:12px 14px 13px}
+.vmeta{padding:12px 14px 13px;min-height:114px}
 .vmeta b{display:block;font-family:var(--jp);font-size:16px;font-weight:500;line-height:1.35;margin-bottom:3px}
+.vmeta p{font-size:12px;line-height:1.5;color:var(--sumi-2);margin:5px 0 9px;display:-webkit-box;
+  -webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .vmeta span{display:block;font-size:11px;color:var(--kasumi);font-family:var(--mono)}
 .video-stage{margin:0 0 22px}
 .video-stage video{display:block;width:100%;aspect-ratio:16/9;background:#171516;border:1px solid var(--line);
   border-radius:8px;box-shadow:var(--shadow-lg)}
-.video-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin:0 0 14px}
+.video-head{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;margin:0 0 14px}
 .video-head h3{font-family:var(--jp);font-size:23px;font-weight:400;line-height:1.35;margin:3px 0 0}
-.video-head .vh-ja{font-family:var(--jp);font-size:15px;color:var(--matcha-d);text-align:right}
+.video-head .vh-ja{font-size:12px;color:var(--kasumi);text-align:right;line-height:1.7;flex:0 0 auto}
+.video-head .vh-ja span{display:block}.video-head .vh-ja [lang="ja"]{font-family:var(--jp);font-size:15px;color:var(--matcha-d)}
+.video-summary{font-size:13px;line-height:1.65;color:var(--sumi-2);max-width:620px;margin:7px 0 0}
+.video-stamp{font-family:var(--mono);font-size:10px;color:var(--shu);margin-top:3px}
 .video-script{border-top:1px solid var(--line);margin:20px 0 8px}
 .vline{display:grid;grid-template-columns:38px minmax(0,1fr);gap:12px;padding:12px 2px;border-bottom:1px solid var(--line)}
 .vline .vs{font-family:var(--mono);font-size:10px;color:var(--washi-2);background:var(--matcha);width:28px;height:28px;
   border-radius:50%;display:grid;place-items:center;margin-top:2px}
+.vline .vbeat{font-size:10px;font-family:var(--mono);font-weight:700;color:var(--shu);margin-bottom:3px}
+.vline .vn{font-size:12.5px;color:var(--sumi-2);line-height:1.55;margin-bottom:6px}
 .vline .vj{font-family:var(--jp);font-size:17px;line-height:1.55;overflow-wrap:anywhere}
+.vline .vj small{font-family:var(--ko);font-size:10px;font-weight:700;color:var(--matcha-d);margin-right:7px}
 .vline .vk{font-size:12.5px;color:var(--sumi-2);line-height:1.55;margin-top:2px}
 @media (max-width:560px){
   .video-grid{grid-template-columns:1fr}
@@ -1442,7 +1450,7 @@ function wrongQuestions(){
 const VIEWS=[
   {id:"overview", n:"一",  label:"개요",     cnt:()=>pages.length+"p"},
   {id:"daily",    n:"二",  label:"데일리",   cnt:()=>PLAN.length+"일"},
-  {id:"video",    n:"三",  label:"영상 학습", cnt:()=>VIDEO_LESSONS.length},
+  {id:"video",    n:"三",  label:"요미 스토리",cnt:()=>VIDEO_LESSONS.length},
   {id:"guide",    n:"四",  label:"초보 가이드",cnt:()=>GUIDES.length},
   {id:"kana",     n:"五",  label:"가나",     cnt:()=>KANA.length},
   {id:"grammar",  n:"六",  label:"문형",     cnt:()=>GRAMMAR.length},
@@ -1572,7 +1580,7 @@ function vDaily(){
   list.appendChild(grid); m.appendChild(list);
 }
 
-/* ── 상황 영상 ── */
+/* ── 요미짭짭 이야기 ── */
 function videoClock(seconds){
   const n=Math.max(0,Math.round(Number(seconds)||0));
   return `${Math.floor(n/60)}:${String(n%60).padStart(2,"0")}`;
@@ -1581,48 +1589,59 @@ function openVideo(id){ videoOpen=id; current="video"; drawNav(); render(); }
 function vVideo(){
   const selected=VIDEO_LESSONS.find(v=>v.id===videoOpen);
   if(selected){
-    const m=title("영상 학습","");
-    const back=el("button","btn","← 영상 목록"); back.style.marginBottom="16px";
+    const story=selected.story||{};
+    const episodeTitle=story.episodeTitle||selected.title;
+    const m=title("요미짭짭 이야기","");
+    const back=el("button","btn","← 이야기 목록"); back.style.marginBottom="16px";
     back.onclick=()=>{videoOpen=null;vVideo();}; m.appendChild(back);
 
     const head=el("div","video-head");
-    head.innerHTML=`<div><div class="eyebrow">LESSON ${esc(selected.lesson)} · ${esc(selected.scene)}</div>
-      <h3>${esc(selected.title)}</h3></div><div class="vh-ja" lang="ja">${esc(selected.titleJa)}</div>`;
+    head.innerHTML=`<div><div class="eyebrow">EPISODE ${esc(selected.lesson)} · ${esc(story.locationLabel||selected.scene)}</div>
+      <h3>${esc(episodeTitle)}</h3><p class="video-summary">${esc(story.summary||"")}</p></div>
+      <div class="vh-ja"><span>${esc(selected.title)}</span><span lang="ja">${esc(selected.titleJa)}</span>
+      <div class="video-stamp">벚꽃 도장 · ${esc(story.stamp||"")}</div></div>`;
     m.appendChild(head);
 
     const stage=el("div","video-stage");
     const player=document.createElement("video");
     player.controls=true; player.playsInline=true; player.preload="metadata";
-    player.poster=selected.poster; player.setAttribute("aria-label",`${selected.title} 상황 영상`);
+    player.poster=selected.poster; player.setAttribute("aria-label",`${episodeTitle} 요미짭짭 이야기 영상`);
     const source=document.createElement("source"); source.src=selected.video; source.type="video/mp4"; player.appendChild(source);
     const track=document.createElement("track"); track.kind="subtitles"; track.srclang="ko";
     track.label="일본어·한국어 자막"; track.src=selected.subtitles; player.appendChild(track);
     stage.appendChild(player); m.appendChild(stage);
 
     const script=el("div","video-script");
-    selected.lines.forEach(line=>{
+    const beats=story.beats||selected.lines.map((_,i)=>({line:i,label:"대사",speaker:""}));
+    beats.forEach((beat,index)=>{
+      const line=selected.lines[beat.line??index]||{};
       const row=el("div","vline");
-      row.innerHTML=`<span class="vs">${esc(line.speaker||"·")}</span><div>
-        <div class="vj" lang="ja">${esc(line.ja)}</div><div class="vk ko-only">${esc(line.ko)}</div></div>`;
+      row.innerHTML=`<span class="vs">${String(index+1).padStart(2,"0")}</span><div>
+        <div class="vbeat">${esc(beat.label||"이야기")}</div>
+        ${beat.narration?`<div class="vn">${esc(beat.narration)}</div>`:""}
+        <div class="vj" lang="ja"><small>${esc(beat.speaker||"")}</small>${esc(line.ja||"")}</div>
+        <div class="vk ko-only">${esc(line.ko||"")}</div></div>`;
       script.appendChild(row);
     });
     m.appendChild(script);
 
     const i=VIDEO_LESSONS.indexOf(selected); const nav=el("div","row"); nav.style.justifyContent="space-between";
-    const prev=el("button","btn","‹ 이전 영상"); prev.disabled=i<=0; prev.onclick=()=>openVideo(VIDEO_LESSONS[i-1].id);
-    const next=el("button","btn","다음 영상 ›"); next.disabled=i>=VIDEO_LESSONS.length-1; next.onclick=()=>openVideo(VIDEO_LESSONS[i+1].id);
+    const prev=el("button","btn","‹ 이전 이야기"); prev.disabled=i<=0; prev.onclick=()=>openVideo(VIDEO_LESSONS[i-1].id);
+    const next=el("button","btn","다음 이야기 ›"); next.disabled=i>=VIDEO_LESSONS.length-1; next.onclick=()=>openVideo(VIDEO_LESSONS[i+1].id);
     nav.appendChild(prev); nav.appendChild(next); m.appendChild(nav); markJa(m); return;
   }
 
-  const m=title("영상 학습","교재의 핵심 문형을 짧은 상황 대화와 발음으로 익힙니다.");
+  const m=title("요미짭짭 이야기","요미짭짭과 함께 열한 개의 벚꽃 도장을 모으며 일본어를 익힙니다.");
   if(!VIDEO_LESSONS.length){m.appendChild(el("div","empty","영상이 없습니다."));return;}
   const grid=el("div","video-grid");
   VIDEO_LESSONS.forEach(v=>{
-    const card=el("button","vcard"); card.setAttribute("aria-label",`${v.title} 영상 열기`);
+    const story=v.story||{}; const episodeTitle=story.episodeTitle||v.title;
+    const card=el("button","vcard"); card.setAttribute("aria-label",`${episodeTitle} 영상 열기`);
     const thumb=el("div","vthumb"); const img=document.createElement("img");
     img.src=v.poster; img.alt=""; img.loading="lazy"; img.width=1280; img.height=720;
     thumb.appendChild(img); thumb.appendChild(el("span","vplay","▶"));
-    const meta=el("div","vmeta",`<b>${esc(v.title)}</b><span>LESSON ${esc(v.lesson)} · ${videoClock(v.duration)} · ${esc(v.scene)}</span>`);
+    const meta=el("div","vmeta",`<b>${esc(episodeTitle)}</b><p>${esc(story.summary||"")}</p>
+      <span>EPISODE ${esc(v.lesson)} · ${videoClock(v.duration)} · ${esc(story.locationLabel||v.scene)}</span>`);
     card.appendChild(thumb); card.appendChild(meta); card.onclick=()=>openVideo(v.id); grid.appendChild(card);
   });
   m.appendChild(grid);
@@ -1640,7 +1659,7 @@ function vOverview(){
     개념이 막히면 <b>초보 가이드</b>부터, 한자는 <b>문맥 렌즈</b>로, 외울 땐 <b>플래시카드·퀴즈</b>로. 진도는 이 기기에 저장돼요.</p>
     <div class="cta"></div>`;
   const cta=hero.querySelector(".cta");
-  [["▶ 오늘의 학습","daily","primary"],["상황 영상","video",""],["초보 가이드","guide",""],["플래시카드","drill",""]].forEach(([t,v,cls])=>{
+  [["▶ 오늘의 학습","daily","primary"],["요미 스토리","video",""],["초보 가이드","guide",""],["플래시카드","drill",""]].forEach(([t,v,cls])=>{
     const b=el("button","btn "+cls,t); b.onclick=()=>{current=v; drawNav(); render();}; cta.appendChild(b);
   });
   m.appendChild(hero);
