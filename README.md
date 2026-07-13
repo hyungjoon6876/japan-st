@@ -40,3 +40,22 @@
 - 음성: Microsoft 신경망 TTS (일본어 ja-JP-Nanami, 한국어 ko-KR-SunHi)
 - 트랙 순서 = 교재 레슨 순서 (앨범: `初級日本語 · 듣기 학습`)
 - HTML 앱 자체에도 **「🔊 소리」** 모드가 있어, 화면의 일본어를 탭하면 그 자리에서 발음을 들려줍니다(화면 켠 상태).
+
+## 🎬 상황 영상
+
+`videos/` 폴더에는 레슨별 짧은 상황 영상 11개가 있습니다. 각 영상은 교재의 핵심 문형으로 만든
+30~42초 대화·예문을 **일본어 음성 → 한국어 뜻** 순서로 보여줍니다. 앱의 **영상 학습** 메뉴에서
+포스터를 고르면 한 편만 불러오므로 모바일에서도 불필요한 다운로드가 생기지 않습니다.
+
+- 형식: H.264/AAC MP4, 1280×720, 영상 내 자막 + WebVTT
+- 음성: Microsoft 신경망 TTS (`ja-JP-Nanami`, `ja-JP-Keita`, `ko-KR-SunHi`)
+- 비주얼: 사용자 제공 `GLOAT × GILT Design`의 Blossom 토큰과 요미쩝쩝 액션 자산
+- 전체 영상·포스터·자막 용량: 약 8MB
+
+영상 대본은 `videos/lessons.json`, 생성기는 `tools/generate-lesson-videos.mjs`에 있습니다.
+FFmpeg, FFprobe, ImageMagick, Chrome, `edge-tts`가 준비된 환경에서 아래처럼 다시 만들 수 있습니다.
+
+```bash
+node tools/generate-lesson-videos.mjs
+node tools/generate-lesson-videos.mjs --lesson=06
+```
