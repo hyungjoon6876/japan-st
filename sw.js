@@ -1,4 +1,4 @@
-const VERSION = "132b9e47386e";
+const VERSION = "1e575570fe2d";
 const CACHE = "jpstudy-" + VERSION;
 const PRECACHE = ["./index.html", "./manifest.webmanifest", "./icons/icon-180.png", "./icons/icon-192.png", "./icons/icon-512.png", "./icons/icon-512-maskable.png"];
 

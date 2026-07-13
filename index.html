@@ -466,8 +466,21 @@ details.verb .step small{display:block;font-family:var(--ko);font-size:10px;colo
 .dchip:hover{border-color:var(--matcha)}
 .dchip.done{background:var(--tint);border-color:var(--matcha);color:var(--matcha-d)}
 .dchip.cur{outline:2px solid var(--matcha);outline-offset:1px;font-weight:700}
-.d-hi{background:color-mix(in srgb,var(--gold) 24%,transparent)!important;border-radius:5px;transition:background .2s}
+.d-hi{background:color-mix(in srgb,var(--gold) 24%,transparent)!important;border-radius:6px;
+  box-shadow:0 0 0 2px color-mix(in srgb,var(--gold) 55%,transparent);
+  transition:background .25s,box-shadow .25s;animation:dhiP 1.8s ease-in-out infinite}
 tr.d-hi td{background:color-mix(in srgb,var(--gold) 20%,transparent)!important}
+@keyframes dhiP{50%{box-shadow:0 0 0 4px color-mix(in srgb,var(--gold) 32%,transparent)}}
+@media (prefers-reduced-motion:reduce){.d-hi{animation:none}}
+.nseg{border-radius:4px;padding:0 1px}                 /* 가이드 본문 문장 청크 */
+/* 지금 읽는 문장 자막 — 내레이션 중에만, 터치는 통과 */
+#narrCap{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);
+  max-width:min(680px,92vw);z-index:49;display:none;pointer-events:none;
+  background:color-mix(in srgb,var(--washi-2) 94%,transparent);border:1px solid var(--line-2);
+  box-shadow:0 6px 24px color-mix(in srgb,var(--sumi) 18%,transparent);border-radius:12px;
+  padding:9px 14px;font-size:13.5px;line-height:1.6;color:var(--sumi-2);backdrop-filter:blur(6px)}
+#narrCap.on{display:block}
+#narrCap.ja{font-size:16.5px;color:var(--sumi);font-weight:600}
 
 /* ═══════════ 한자 모듈 ═══════════ */
 /* 탭할 수 있는 한자 (예문·낱말 속) */
@@ -854,13 +867,30 @@ store.daily = store.daily || {pace:"보통", pos:0};
 const TTS_OK = typeof window!=="undefined" && "speechSynthesis" in window;
 let jaVoice=null, koVoice=null, voicesTried=0;
 const JA_OK = () => TTS_OK && !!jaVoice;     // 일본어 음성이 '실제로' 있는가
+/* 음성 점수 랭킹 — 신경망(natural/neural)·온라인 음성을 최우선, 구형(desktop/eSpeak)은 회피 */
+function voiceScore(v, exactRe){
+  const n=v.name||""; let s=0;
+  if(/natural/i.test(n)) s+=40;
+  if(/neural/i.test(n))  s+=36;
+  if(/online/i.test(n))  s+=20;
+  if(/google/i.test(n))  s+=18;
+  if(/premium|enhanced/i.test(n)) s+=14;
+  if(/siri/i.test(n))    s+=10;
+  if(exactRe.test(v.lang||"")) s+=8;
+  if(/espeak|compact/i.test(n)) s-=40;
+  if(/desktop/i.test(n)) s-=18;
+  return s;
+}
+function bestVoice(all, langRe, nameRe, exactRe){
+  const list=all.filter(v=>langRe.test(v.lang)||nameRe.test(v.name));
+  if(!list.length) return null;
+  return list.slice().sort((a,b)=>voiceScore(b,exactRe)-voiceScore(a,exactRe))[0];
+}
 function pickVoices(){
   if(!TTS_OK) return;
   const all=speechSynthesis.getVoices();
-  const ja=all.filter(v=>/ja[-_]?jp/i.test(v.lang)||/japan|日本/i.test(v.name));
-  jaVoice = ja.find(v=>/neural|natural|online/i.test(v.name)) || ja[0] || null;
-  const ko=all.filter(v=>/ko[-_]?kr/i.test(v.lang)||/korean|한국/i.test(v.name));
-  koVoice = ko.find(v=>/neural|natural|online/i.test(v.name)) || ko[0] || null;
+  jaVoice = bestVoice(all, /ja[-_]?jp/i, /japan|日本/i, /^ja[-_]jp$/i);
+  koVoice = bestVoice(all, /ko[-_]?kr/i, /korean|한국/i, /^ko[-_]kr$/i);
 }
 if(TTS_OK){
   pickVoices();
@@ -889,7 +919,8 @@ function speak(text){
   try{
     speechSynthesis.cancel();
     const u=new SpeechSynthesisUtterance(String(text).replace(/[（(].*?[)）]/g,"").slice(0,300));
-    u.lang="ja-JP"; try{ if(jaVoice) u.voice=jaVoice; }catch(e){} u.rate=store.tts.rate||0.9;
+    u.lang="ja-JP"; try{ if(jaVoice) u.voice=jaVoice; }catch(e){}
+    u.rate=(store.tts.rate||0.95)*0.93; u.pitch=1;   // 일본어는 살짝 느리게 — 학습자 청취
     speechSynthesis.speak(u);
   }catch(e){}
 }
@@ -960,8 +991,10 @@ function guideForLesson(L){ return GUIDES.find(g=>(g.related||[]).some(r=>r===L)
 /* 하루 내레이션 — 선생님처럼 맥락을 엮어 설명 [{text,lang,ref?}] */
 function narration(day){
   const q=[];
-  const KO=(s,ref)=>{ chunkText(s).forEach(t=>q.push({text:t,lang:"ko-KR",ref})); };
-  const JA=(s,ref)=>{ chunkText(s).forEach(t=>q.push({text:t,lang:"ja-JP",ref})); };
+  /* gap: 이 발화 뒤 쉬는 시간(ms) — 마지막 청크에만 적용. 낱말→뜻은 붙이고, 항목 사이는 호흡 */
+  const push=(s,lang,ref,gap)=>{ const cs=chunkText(s); cs.forEach((t,i)=>q.push({text:t,lang,ref,gap:(i===cs.length-1?gap:undefined)})); };
+  const KO=(s,ref,gap)=>push(s,"ko-KR",ref,gap);
+  const JA=(s,ref,gap)=>push(s,"ja-JP",ref,gap);
   KO(`자, 데이 ${day.n} 학습을 시작할게요.`);
   KO(`오늘은 ${day.lessons.join(", ")} 부분을 함께 공부해요.`);
   const g0=day.lessons.map(guideForLesson).find(Boolean);
@@ -970,8 +1003,8 @@ function narration(day){
     KO(`먼저 오늘의 낱말 ${day.vocab.length}개예요. 소리 내서 따라 읽어 보세요.`);
     day.vocab.forEach((v,i)=>{
       const ref="d-v-"+day.n+"-"+v.word;
-      JA(v.reading||v.word, ref);
-      KO(`${v.meaning_ko}, 라는 뜻이에요.`, ref);
+      JA(v.reading||v.word, ref, 140);                  // 낱말과 뜻은 붙여서
+      KO(`${v.meaning_ko}, 라는 뜻이에요.`, ref, 500);   // 항목 사이 호흡
       if((i+1)%6===0 && i+1<day.vocab.length) KO("좋아요, 계속 가볼게요.");
     });
   }
@@ -979,41 +1012,52 @@ function narration(day){
     KO("이제 오늘의 문형이에요. 어떻게 쓰는지 하나씩 볼게요.");
     day.grammar.forEach((g,gi)=>{
       const ref="d-g-"+day.n+"-"+gi;
-      JA((g.pattern||"").replace(/[〜~]/g,""), ref);
-      if(g.meaning_ko) KO(`${g.meaning_ko}, 라는 표현이에요.`, ref);
-      if(g.tip&&g.tip.when) KO(g.tip.when, ref);       // 언제 쓰나 (교사 설명)
+      JA((g.pattern||"").replace(/[〜~]/g,""), ref, 140);
+      if(g.meaning_ko) KO(`${g.meaning_ko}, 라는 표현이에요.`, ref, 320);
+      if(g.tip&&g.tip.when) KO(g.tip.when, ref, 320);  // 언제 쓰나 (교사 설명)
       const exs=(g.examples||[]).slice(0,2);
-      if(exs.length) KO("예문을 들어볼게요.", ref);
-      exs.forEach(ex=>{ JA(ex.jp, ref); if(ex.ko) KO(`${ex.ko}, 라는 뜻이죠.`, ref); });
-      if(g.tip&&g.tip.mistake) KO(`여기서 주의할 점이 있어요. ${g.tip.mistake}`, ref);  // 실수 포인트
+      if(exs.length) KO("예문을 들어볼게요.", ref, 240);
+      exs.forEach(ex=>{ JA(ex.jp, ref, 140); if(ex.ko) KO(`${ex.ko}, 라는 뜻이죠.`, ref, 400); });
+      if(g.tip&&g.tip.mistake) KO(`여기서 주의할 점이 있어요. ${g.tip.mistake}`, ref, 500);  // 실수 포인트
     });
   }
   if(day.kanji.length){
     KO(`오늘 나온 한자는 ${day.kanji.length}자예요. 뜻만 짚고 갈게요.`);
     day.kanji.slice(0,10).forEach(ch=>{ const k=KJ.get(ch); if(!k)return;
-      JA((k.on&&k.on[0]&&k.on[0][0])||ch); KO(`${k.kmean}. 한국 한자음은 ${(k.kh||[]).join(", ")}이에요.`);
+      const ref="d-k-"+day.n+"-"+ch;
+      JA((k.on&&k.on[0]&&k.on[0][0])||ch, ref, 140);
+      KO(`${k.kmean}. 한국 한자음은 ${(k.kh||[]).join(", ")}이에요.`, ref, 450);
     });
   }
   KO(`오늘 학습은 여기까지예요. 낱말 ${day.vocab.length}개, 문형 ${day.grammar.length}개를 함께 봤어요. 정말 잘 하셨어요. 내일 또 만나요.`);
   return q;
 }
 
-/* 초보 가이드 페이지 전체를 선생님처럼 낭독 */
+/* 초보 가이드 페이지 전체를 선생님처럼 낭독
+   — 문장 청크는 guideDetail 렌더와 '같은 gChunks'로 잘라 ref가 1:1로 맞는다(문장 단위 하이라이트) */
+const gChunks = s => chunkText(String(s||"").replace(/\s+/g," "));
 function guideNarration(g){
   const q=[];
-  const KO=s=>{ chunkText(String(s||"").replace(/\s+/g," ")).forEach(t=>q.push({text:t,lang:"ko-KR"})); };
-  const JA=s=>{ chunkText(s).forEach(t=>q.push({text:t,lang:"ja-JP"})); };
-  KO(`${g.title}. 오늘은 이 개념을 같이 공부해 볼게요.`);
-  KO(g.summary); KO(g.intro);
-  (g.sections||[]).forEach(s=>{
-    KO(s.heading); KO(s.body);
-    (s.examples||[]).slice(0,3).forEach(ex=>{ JA(ex.jp); if(ex.ko) KO(`${ex.ko}, 라는 뜻이에요.`); });
+  const push=(s,lang,ref,gap)=>{ const cs=gChunks(s); cs.forEach((t,i)=>q.push({text:t,lang,ref,gap:(i===cs.length-1?gap:undefined)})); };
+  const KO=(s,ref,gap)=>push(s,"ko-KR",ref,gap);
+  const JA=(s,ref,gap)=>push(s,"ja-JP",ref,gap);
+  KO(`${g.title}. 오늘은 이 개념을 같이 공부해 볼게요.`,"g-hero");
+  KO(g.summary,"g-hero",350);
+  gChunks(g.intro).forEach((t,j)=>q.push({text:t,lang:"ko-KR",ref:"g-in-c"+j,gap:240}));
+  (g.sections||[]).forEach((s,si)=>{
+    KO(s.heading,"g-s"+si+"-h",300);
+    gChunks(s.body).forEach((t,j)=>q.push({text:t,lang:"ko-KR",ref:"g-s"+si+"-c"+j,gap:240}));
+    (s.examples||[]).slice(0,3).forEach((ex,ei)=>{ const er="g-s"+si+"-e"+ei;
+      JA(ex.jp,er,140); if(ex.ko) KO(`${ex.ko}, 라는 뜻이에요.`,er,400); });
   });
   if((g.mistakes||[]).length){
-    KO("이번엔 초보자가 자주 하는 실수를 볼게요.");
-    g.mistakes.forEach(ms=>{ if(ms.wrong){ JA(ms.wrong); KO("이건 틀린 표현이고,"); } if(ms.right){ JA(ms.right); KO("이렇게 쓰는 게 맞아요."); } if(ms.note) KO(ms.note); });
+    KO("이번엔 초보자가 자주 하는 실수를 볼게요.",null,240);
+    g.mistakes.forEach((ms,mi)=>{ const mr="g-m"+mi;
+      if(ms.wrong){ JA(ms.wrong,mr,140); KO("이건 틀린 표현이고,",mr,240); }
+      if(ms.right){ JA(ms.right,mr,140); KO("이렇게 쓰는 게 맞아요.",mr,300); }
+      if(ms.note) KO(ms.note,mr,450); });
   }
-  (g.tips||[]).forEach(t=>KO(`기억할 팁이에요. ${t}`));
+  (g.tips||[]).forEach((t,ti)=>KO(`기억할 팁이에요. ${t}`,"g-t"+ti,450));
   KO("여기까지예요. 오늘도 잘 하셨어요.");
   return q;
 }
@@ -1022,26 +1066,38 @@ function guideNarration(g){
 const Narrator = (()=>{
   let queue=[], idx=0, playing=false, onstep=null, ondone=null;
   let runId=0, errs=0, spoke=0, watchdog=null, keepalive=null;
+  // pause/resume 트릭은 크롬 데스크톱 15초 컷오프 전용 — 모바일·사파리에선 말 더듬만 유발
+  const NEED_KEEPALIVE = /Chrome\//.test(navigator.userAgent||"") && !/iPhone|iPad|iPod|Android|Mobile/.test(navigator.userAgent||"");
   const clearHi=()=>document.querySelectorAll(".d-hi").forEach(e=>e.classList.remove("d-hi"));
+  /* 지금 읽는 문장 자막 (ref 없는 전환 멘트도 눈으로 따라가게) */
+  let capEl=null;
+  const cap=()=>{ if(!capEl){ capEl=document.createElement("div"); capEl.id="narrCap"; document.body.appendChild(capEl); } return capEl; };
+  const capShow=(t,lang)=>{ const c=cap(); c.textContent=t; c.classList.add("on"); c.classList.toggle("ja",(lang||"").indexOf("ja")===0); };
+  const capHide=()=>{ if(capEl){ capEl.classList.remove("on"); capEl.textContent=""; } };
   function clearTimers(){ if(watchdog){clearTimeout(watchdog);watchdog=null;} if(keepalive){clearInterval(keepalive);keepalive=null;} }
-  function halt(){ playing=false; runId++; clearTimers(); try{speechSynthesis.cancel();}catch(e){} clearHi(); }
+  function halt(){ playing=false; runId++; clearTimers(); try{speechSynthesis.cancel();}catch(e){} clearHi(); capHide(); }
   function stop(){ halt(); idx=0; }                 // 완전 정지: 위치도 리셋
   function pause(){ halt(); }                       // 일시정지: idx 유지
   function step(){
     const gen=runId;
     if(!playing) return;
-    if(idx>=queue.length){ playing=false; clearTimers(); clearHi();
+    if(idx>=queue.length){ playing=false; clearTimers(); clearHi(); capHide();
       const ok = spoke>0 && errs===0;               // 실제로 소리가 났을 때만 '정상 완료'
       if(ondone) ondone(ok); return; }
     const q=queue[idx]; clearHi();
     if(q.ref){ const t=document.getElementById(q.ref); if(t){ t.classList.add("d-hi"); t.scrollIntoView({block:"center",behavior:"smooth"}); } }
     if(onstep) onstep(idx, queue.length);
     const txt=String(q.text).replace(/[（(].*?[)）]/g,"");
+    capShow(txt, q.lang);
     const u=new SpeechSynthesisUtterance(txt);
     u.lang=q.lang;
     try{ const vv=(q.lang.indexOf("ja")===0?jaVoice:koVoice); if(vv) u.voice=vv; }catch(e){}
-    u.rate=(store.tts.rate||0.95);
-    const advance=()=>{ if(!playing||gen!==runId) return; clearTimeout(watchdog); watchdog=null; idx++; setTimeout(()=>{ if(gen===runId) step(); },230); };
+    const base=(store.tts.rate||0.95);
+    u.rate = q.lang.indexOf("ja")===0 ? base*0.93 : base;   // 일본어만 살짝 느리게
+    u.pitch=1;
+    const advance=()=>{ if(!playing||gen!==runId) return; clearTimeout(watchdog); watchdog=null; idx++;
+      const gap=(q.gap!=null?q.gap:260);                     // 항목 성격에 맞는 호흡
+      setTimeout(()=>{ if(gen===runId) step(); },gap); };
     u.onstart=()=>{ spoke++; };
     u.onend=advance;
     u.onerror=()=>{ if(gen!==runId) return; if(++errs>=3){ halt();
@@ -1058,8 +1114,8 @@ const Narrator = (()=>{
       playing=true; runId++; errs=0; spoke=0;
       queue=q; idx=Math.min(Math.max(0, from||0), Math.max(0,q.length-1));
       onstep=sstep; ondone=sdone;
-      // 모바일에서 백그라운드/장시간 시 엔진이 멈추는 것 완화
-      keepalive=setInterval(()=>{ try{ if(playing && speechSynthesis.speaking){ speechSynthesis.pause(); speechSynthesis.resume(); } }catch(e){} }, 9000);
+      // 크롬 데스크톱의 15초 발화 컷오프 완화 (모바일·사파리는 오히려 부드러움을 해쳐 제외)
+      if(NEED_KEEPALIVE) keepalive=setInterval(()=>{ try{ if(playing && speechSynthesis.speaking){ speechSynthesis.pause(); speechSynthesis.resume(); } }catch(e){} }, 9000);
       step();
     },
     pause, stop, isPlaying:()=>playing, index:()=>idx
@@ -1470,7 +1526,8 @@ function vDaily(){
     const s=el("div","sec"); s.appendChild(el("h3",null,`오늘의 한자 ${day.kanji.length}`));
     const kg=el("div","kgrid");
     day.kanji.forEach(ch=>{ const k=KJ.get(ch); if(!k)return;
-      const t=el("button","ktile"); t.innerHTML=`<span class="gband g-${k.g}"></span><span class="kc">${esc(ch)}</span><span class="km">${esc(k.kmean||"")}</span>`;
+      const t=el("button","ktile"); t.id="d-k-"+dayNo+"-"+ch;
+      t.innerHTML=`<span class="gband g-${k.g}"></span><span class="kc">${esc(ch)}</span><span class="km">${esc(k.kmean||"")}</span>`;
       t.onclick=()=>openLens(ch); kg.appendChild(t); });
     s.appendChild(kg); m.appendChild(s);
   }
@@ -1615,6 +1672,7 @@ function guideDetail(g){
   m.appendChild(back);
 
   const hero=el("div","guide-hero");
+  hero.id="g-hero";
   const i=GUIDES.findIndex(x=>x.id===g.id)+1;
   hero.innerHTML=`<div class="eyebrow">초보 가이드 · ${String(i).padStart(2,"0")}</div>
     <h2>${esc(g.title)}</h2><p>${esc(g.summary||"")}</p>`;
@@ -1639,15 +1697,17 @@ function guideDetail(g){
     };
   }
 
-  if(g.intro){ const p=el("p"); p.style.cssText="font-size:15px;color:var(--sumi-2);line-height:1.85;margin:0 0 20px"; p.textContent=g.intro; m.appendChild(p); }
+  /* 문장 청크 span — guideNarration의 gChunks와 같은 분할이라 낭독 ref와 1:1로 맞는다 */
+  const segHtml=(s,pre)=>gChunks(s).map((c,j)=>`<span class="nseg" id="${pre}c${j}">${esc(c)}</span>`).join(" ");
+  if(g.intro){ const p=el("p"); p.style.cssText="font-size:15px;color:var(--sumi-2);line-height:1.85;margin:0 0 20px"; p.innerHTML=segHtml(g.intro,"g-in-"); m.appendChild(p); }
 
-  (g.sections||[]).forEach(s=>{
+  (g.sections||[]).forEach((s,si)=>{
     const sec=el("div","gsec");
-    if(s.heading) sec.appendChild(el("h4",null,esc(s.heading)));
-    if(s.body){ const b=el("div","body"); b.textContent=s.body; sec.appendChild(b); }
+    if(s.heading){ const h4=el("h4",null,esc(s.heading)); h4.id="g-s"+si+"-h"; sec.appendChild(h4); }
+    if(s.body){ const b=el("div","body"); b.innerHTML=segHtml(s.body,"g-s"+si+"-"); sec.appendChild(b); }
     const t=guideTable(s.table); if(t) sec.appendChild(t);
-    (s.examples||[]).forEach(ex=>{
-      const e=el("div","ex"); e.style.cursor="default";
+    (s.examples||[]).forEach((ex,ei)=>{
+      const e=el("div","ex"); e.style.cursor="default"; e.id="g-s"+si+"-e"+ei;
       let h=`<div class="j">${esc(ex.jp)}</div>`;
       if(ex.reading) h+=`<div class="furi" style="opacity:1;max-height:2em">${esc(ex.reading)}</div>`;
       if(ex.ko) h+=`<div class="k">${esc(ex.ko)}</div>`;
@@ -1661,8 +1721,8 @@ function guideDetail(g){
     const sec=el("div","gsec");
     sec.appendChild(el("h4",null,"자주 하는 실수"));
     const grid=el("div","miss-grid");
-    g.mistakes.forEach(ms=>{
-      const row=el("div","miss-row");
+    g.mistakes.forEach((ms,mi)=>{
+      const row=el("div","miss-row"); row.id="g-m"+mi;
       let inner="";
       if((ms.wrong||"").trim() || (ms.right||"").trim()){
         inner+=`<div class="xo"><div class="x">${esc(ms.wrong||"—")}</div><div class="o">${esc(ms.right||"—")}</div></div>`;
@@ -1675,8 +1735,8 @@ function guideDetail(g){
   }
 
   /* 암기 팁 */
-  (g.tips||[]).forEach(tp=>{
-    const c=el("div","callout tip");
+  (g.tips||[]).forEach((tp,ti)=>{
+    const c=el("div","callout tip"); c.id="g-t"+ti;
     c.innerHTML=`<span class="ct">암기 팁</span>${esc(tp)}`;
     m.appendChild(c);
   });
@@ -2276,7 +2336,9 @@ document.addEventListener("click",e=>{
   for(let d=0; node && d<4; d++, node=node.parentElement){
     const t=node.textContent||"";
     if(/[぀-ヿ一-鿿]/.test(t)){
-      if(t.length<=90){ const jp=extractJa(t); if(jp) speak(jp); }
+      if(t.length<=90){ const jp=extractJa(t); if(jp){ speak(jp);
+        // 읽는 부분 표시 — 탭한 텍스트를 잠깐 포커싱
+        const tgt=node; tgt.classList.add("d-hi"); setTimeout(()=>tgt.classList.remove("d-hi"),900); } }
       return;
     }
   }
